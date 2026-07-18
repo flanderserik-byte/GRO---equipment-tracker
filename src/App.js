@@ -20,6 +20,7 @@ const createCheckout  = async ({ equipmentId, crewId, location, returnDate }) =>
 const returnCheckout  = async (id) => { const { error } = await supabase.from("checkouts").update({ returned_at: new Date().toISOString().split("T")[0] }).eq("id", id); if (error) throw error; };
 const fetchJobSites   = async () => { const { data, error } = await supabase.from("job_sites").select("*").eq("active", true).order("name"); if (error) throw error; return data; };
 const addJobSite      = async (name) => { const { error } = await supabase.from("job_sites").insert([{ name }]); if (error) throw error; };
+const addJobSitesBulk = async (names) => { const { error } = await supabase.from("job_sites").insert(names.map(name => ({ name }))); if (error) throw error; };
 const removeJobSite   = async (id) => { const { error } = await supabase.from("job_sites").update({ active: false }).eq("id", id); if (error) throw error; };
 const fetchDamageReports = async () => { const { data, error } = await supabase.from("damage_reports").select("*").order("created_at", { ascending: false }); if (error) throw error; return data; };
 const createDamageReport = async ({ equipmentId, crewId, description }) => { const { error } = await supabase.from("damage_reports").insert([{ equipment_id: equipmentId, crew_id: crewId, description }]); if (error) throw error; };
@@ -74,6 +75,7 @@ export default function App() {
   const [newEquip, setNewEquip] = useState({ name: "", category: "Hand Tools" });
   const [newCrew, setNewCrew] = useState({ name: "", pin: "" });
   const [newSite, setNewSite] = useState("");
+  const [csvPreview, setCsvPreview] = useState(null); // { headers, rows, col }
   const [coForm, setCoForm] = useState({ equipmentId: "", location: "", returnDate: "" });
   const [reportForm, setReportForm] = useState({ equipmentId: "", description: "" });
   const [filterStatus, setFilterStatus] = useState("all");
@@ -160,6 +162,54 @@ export default function App() {
     catch { showToast("Error adding job site"); }
   };
   const handleRemoveSite = wrap(removeJobSite, "Job site removed");
+
+  // ─── CSV import for job sites ───
+  const parseCSVLine = (line) => {
+    const out = []; let cur = ""; let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+      else if (ch === "," && !inQ) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+
+  const handleCSVFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast("CSV looks empty"); return; }
+      const headers = parseCSVLine(lines[0]);
+      const rows = lines.slice(1).map(parseCSVLine);
+      // Auto-detect a likely column: property, site, name, address, job
+      const guess = headers.findIndex(h => /propert|site|job|name|address/i.test(h));
+      setCsvPreview({ headers, rows, col: guess >= 0 ? guess : 0 });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleCSVImport = async () => {
+    if (!csvPreview) return;
+    const existing = new Set(jobSites.map(s => s.name.toLowerCase()));
+    const names = [...new Set(
+      csvPreview.rows
+        .map(r => (r[csvPreview.col] || "").trim())
+        .filter(n => n && !existing.has(n.toLowerCase()))
+    )];
+    if (!names.length) { showToast("No new sites found — all duplicates or empty"); setCsvPreview(null); return; }
+    try {
+      await addJobSitesBulk(names);
+      await loadAll();
+      setCsvPreview(null);
+      showToast(`Imported ${names.length} job site${names.length !== 1 ? "s" : ""}`);
+    } catch { showToast("Error importing sites"); }
+  };
 
   const handleSetStatus = async (id, status) => {
     try { await setEquipmentStatus(id, status, maintNotes); await loadAll(); setMaintModal(null); setMaintNotes(""); showToast("Status updated"); }
@@ -496,6 +546,33 @@ export default function App() {
                   <button onClick={handleAddSite} style={btn("primary")}>Add</button>
                 </div>
               </div>
+
+              <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Import from Aspire (CSV)</div>
+                <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 12 }}>Export a property or job report from Aspire as CSV, then upload it here. Duplicates are skipped automatically.</div>
+                {!csvPreview ? (
+                  <label style={{ ...btn(), display: "block", textAlign: "center", cursor: "pointer" }}>
+                    Choose CSV File
+                    <input type="file" accept=".csv,text/csv" onChange={handleCSVFile} style={{ display: "none" }} />
+                  </label>
+                ) : (
+                  <div>
+                    <label style={label}>Which column has the job site names?</label>
+                    <select value={csvPreview.col} onChange={e => setCsvPreview(p => ({ ...p, col: parseInt(e.target.value) }))} style={{ ...inp, marginBottom: 10 }}>
+                      {csvPreview.headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                    </select>
+                    <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 10 }}>
+                      Preview: {csvPreview.rows.slice(0, 3).map(r => r[csvPreview.col]).filter(Boolean).join(" · ") || "(no values in this column)"}
+                      {csvPreview.rows.length > 3 ? ` · +${csvPreview.rows.length - 3} more` : ""}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={handleCSVImport} style={{ ...btn("primary"), flex: 1 }}>Import {csvPreview.rows.length} Rows</button>
+                      <button onClick={() => setCsvPreview(null)} style={btn()}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {jobSites.map(s => (
                 <div key={s.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>{s.name}</div>
