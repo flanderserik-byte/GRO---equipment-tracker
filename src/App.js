@@ -20,7 +20,8 @@ const createCheckout  = async ({ equipmentId, crewId, location, returnDate }) =>
 const returnCheckout  = async (id) => { const { error } = await supabase.from("checkouts").update({ returned_at: new Date().toISOString().split("T")[0] }).eq("id", id); if (error) throw error; };
 const fetchJobSites   = async () => { const { data, error } = await supabase.from("job_sites").select("*").eq("active", true).order("name"); if (error) throw error; return data; };
 const addJobSite      = async (name, address) => { const { error } = await supabase.from("job_sites").insert([{ name, address: address || null }]); if (error) throw error; };
-const addJobSitesBulk = async (names) => { const { error } = await supabase.from("job_sites").insert(names.map(name => ({ name }))); if (error) throw error; };
+const addJobSitesBulk = async (sites) => { const { error } = await supabase.from("job_sites").insert(sites.map(s => ({ name: s.name, address: s.address || null }))); if (error) throw error; };
+const updateJobSiteAddress = async (id, address) => { const { error } = await supabase.from("job_sites").update({ address: address || null }).eq("id", id); if (error) throw error; };
 
 // Opens Apple Maps on iPhone/iPad, Google Maps everywhere else, with directions from current location
 const mapsUrl = (q) => {
@@ -201,9 +202,10 @@ export default function App() {
       if (lines.length < 2) { showToast("CSV looks empty"); return; }
       const headers = parseCSVLine(lines[0]);
       const rows = lines.slice(1).map(parseCSVLine);
-      // Auto-detect a likely column: property, site, name, address, job
-      const guess = headers.findIndex(h => /propert|site|job|name|address/i.test(h));
-      setCsvPreview({ headers, rows, col: guess >= 0 ? guess : 0 });
+      const guessName = headers.findIndex(h => /propert|site|job|name/i.test(h));
+      let guessAddr = headers.findIndex(h => /address|street/i.test(h));
+      if (guessAddr === guessName) guessAddr = -1;
+      setCsvPreview({ headers, rows, col: guessName >= 0 ? guessName : 0, addrCol: guessAddr });
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -212,17 +214,21 @@ export default function App() {
   const handleCSVImport = async () => {
     if (!csvPreview) return;
     const existing = new Set(jobSites.map(s => s.name.toLowerCase()));
-    const names = [...new Set(
-      csvPreview.rows
-        .map(r => (r[csvPreview.col] || "").trim())
-        .filter(n => n && !existing.has(n.toLowerCase()))
-    )];
-    if (!names.length) { showToast("No new sites found — all duplicates or empty"); setCsvPreview(null); return; }
+    const seen = new Set();
+    const sites = [];
+    for (const r of csvPreview.rows) {
+      const name = (r[csvPreview.col] || "").trim();
+      if (!name || existing.has(name.toLowerCase()) || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      const address = csvPreview.addrCol >= 0 ? (r[csvPreview.addrCol] || "").trim() : "";
+      sites.push({ name, address });
+    }
+    if (!sites.length) { showToast("No new sites found — all duplicates or empty"); setCsvPreview(null); return; }
     try {
-      await addJobSitesBulk(names);
+      await addJobSitesBulk(sites);
       await loadAll();
       setCsvPreview(null);
-      showToast(`Imported ${names.length} job site${names.length !== 1 ? "s" : ""}`);
+      showToast(`Imported ${sites.length} job site${sites.length !== 1 ? "s" : ""}`);
     } catch { showToast("Error importing sites"); }
   };
 
