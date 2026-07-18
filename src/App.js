@@ -19,8 +19,15 @@ const fetchCheckouts  = async () => { const { data, error } = await supabase.fro
 const createCheckout  = async ({ equipmentId, crewId, location, returnDate }) => { const { error } = await supabase.from("checkouts").insert([{ equipment_id: equipmentId, crew_id: crewId, location, return_date: returnDate, checked_out_at: new Date().toISOString().split("T")[0], returned_at: null }]); if (error) throw error; };
 const returnCheckout  = async (id) => { const { error } = await supabase.from("checkouts").update({ returned_at: new Date().toISOString().split("T")[0] }).eq("id", id); if (error) throw error; };
 const fetchJobSites   = async () => { const { data, error } = await supabase.from("job_sites").select("*").eq("active", true).order("name"); if (error) throw error; return data; };
-const addJobSite      = async (name) => { const { error } = await supabase.from("job_sites").insert([{ name }]); if (error) throw error; };
+const addJobSite      = async (name, address) => { const { error } = await supabase.from("job_sites").insert([{ name, address: address || null }]); if (error) throw error; };
 const addJobSitesBulk = async (names) => { const { error } = await supabase.from("job_sites").insert(names.map(name => ({ name }))); if (error) throw error; };
+
+// Opens Apple Maps on iPhone/iPad, Google Maps everywhere else, with directions from current location
+const mapsUrl = (q) => {
+  const enc = encodeURIComponent(q);
+  const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+  return isApple ? `https://maps.apple.com/?daddr=${enc}` : `https://www.google.com/maps/dir/?api=1&destination=${enc}`;
+};
 const removeJobSite   = async (id) => { const { error } = await supabase.from("job_sites").update({ active: false }).eq("id", id); if (error) throw error; };
 const fetchDamageReports = async () => { const { data, error } = await supabase.from("damage_reports").select("*").order("created_at", { ascending: false }); if (error) throw error; return data; };
 const createDamageReport = async ({ equipmentId, crewId, description }) => { const { error } = await supabase.from("damage_reports").insert([{ equipment_id: equipmentId, crew_id: crewId, description }]); if (error) throw error; };
@@ -158,7 +165,15 @@ export default function App() {
 
   const handleAddSite = async () => {
     if (!newSite.trim()) return;
-    try { await addJobSite(newSite.trim()); await loadAll(); setNewSite(""); showToast("Job site added"); }
+    const addrEl = document.getElementById("site-addr");
+    const address = addrEl ? addrEl.value.trim() : "";
+    try {
+      await addJobSite(newSite.trim(), address);
+      await loadAll();
+      setNewSite("");
+      if (addrEl) addrEl.value = "";
+      showToast("Job site added");
+    }
     catch { showToast("Error adding job site"); }
   };
   const handleRemoveSite = wrap(removeJobSite, "Job site removed");
@@ -359,14 +374,17 @@ export default function App() {
               {myActive.map(co => {
                 const equip = equipment.find(e => e.id === co.equipment_id);
                 const od = isOverdue(co.return_date);
+                const site = jobSites.find(s => s.name === co.location);
                 return (
                   <div key={co.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>{equip?.name}</div>
-                      <div style={{ fontSize: 13, color: GRO.textMid }}>{co.location}</div>
-                      <div style={{ fontSize: 13, color: od ? GRO.danger : GRO.textMid }}>Return by: {co.return_date}{od ? " — overdue" : ""}</div>
+                      <a href={mapsUrl((site && site.address) || co.location)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: GRO.green, fontWeight: 600, textDecoration: "none" }}>
+                        📍 {co.location}
+                      </a>
+                      <div style={{ fontSize: 13, color: od ? GRO.danger : GRO.textMid, marginTop: 2 }}>Return by: {co.return_date}{od ? " — overdue" : ""}</div>
                     </div>
-                    <button onClick={() => handleReturn(co.id)} style={{ ...btn(), padding: "10px 16px" }}>Return</button>
+                    <button onClick={() => handleReturn(co.id)} style={{ ...btn(), padding: "10px 16px", flexShrink: 0, marginLeft: 8 }}>Return</button>
                   </div>
                 );
               })}
@@ -541,8 +559,9 @@ export default function App() {
             <div>
               <div style={{ ...card, marginBottom: 14 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Add job site</div>
+                <input placeholder="Job site name" value={newSite} onChange={e => setNewSite(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input placeholder="Job site name" value={newSite} onChange={e => setNewSite(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddSite()} style={{ ...inp, flex: 1 }} />
+                  <input id="site-addr" placeholder="Address (optional, for directions)" style={{ ...inp, flex: 1 }} />
                   <button onClick={handleAddSite} style={btn("primary")}>Add</button>
                 </div>
               </div>
@@ -575,8 +594,14 @@ export default function App() {
 
               {jobSites.map(s => (
                 <div key={s.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{s.name}</div>
-                  <button onClick={() => handleRemoveSite(s.id)} style={{ ...btn("danger"), fontSize: 12, padding: "6px 10px" }}>✕</button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{s.name}</div>
+                    {s.address && <div style={{ fontSize: 12, color: GRO.textMid }}>{s.address}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                    <a href={mapsUrl(s.address || s.name)} target="_blank" rel="noopener noreferrer" style={{ ...btn(), fontSize: 12, padding: "6px 10px", textDecoration: "none", background: GRO.greenPale, color: GRO.green }}>Directions</a>
+                    <button onClick={() => handleRemoveSite(s.id)} style={{ ...btn("danger"), fontSize: 12, padding: "6px 10px" }}>✕</button>
+                  </div>
                 </div>
               ))}
               {jobSites.length === 0 && <div style={{ color: GRO.textMid, fontSize: 15, textAlign: "center", padding: 24 }}>No job sites yet — add your active sites above</div>}
