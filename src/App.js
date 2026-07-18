@@ -22,14 +22,33 @@ const subscribeToEquipment = (cb) => supabase.channel("equipment-changes").on("p
 const ADMIN_PIN = "1234";
 const CATEGORIES = ["Power Tools","Heavy Equipment","Small Engine Equipment","Hand Tools","Measurement","Safety","General"];
 
+// GRO Brand colors
+const GRO = {
+  green:      "#2D5F3F",
+  greenLight: "#3a7a52",
+  greenPale:  "#eaf2ec",
+  white:      "#ffffff",
+  gray:       "#f5f5f5",
+  textDark:   "#1a1a1a",
+  textMid:    "#555555",
+  textLight:  "#888888",
+  border:     "#dde8e0",
+  danger:     "#c0392b",
+  dangerBg:   "#fdecea",
+  warning:    "#b7640a",
+  warningBg:  "#fef3e2",
+  success:    "#2D5F3F",
+  successBg:  "#eaf2ec",
+};
+
 const today = () => new Date().toISOString().split("T")[0];
 const isOverdue = (d) => d && d < today();
 
 const statusInfo = (s) => ({
-  available:     { bg: "var(--color-background-success)", color: "var(--color-text-success)",  label: "Available"   },
-  "checked-out": { bg: "var(--color-background-warning)", color: "var(--color-text-warning)",  label: "Checked Out" },
-  overdue:       { bg: "var(--color-background-danger)",  color: "var(--color-text-danger)",   label: "Overdue"     },
-}[s] || { bg: "var(--color-background-secondary)", color: "var(--color-text-secondary)", label: s });
+  available:     { bg: GRO.successBg,  color: GRO.success,  label: "Available"   },
+  "checked-out": { bg: GRO.warningBg,  color: GRO.warning,  label: "Checked Out" },
+  overdue:       { bg: GRO.dangerBg,   color: GRO.danger,   label: "Overdue"     },
+}[s] || { bg: GRO.gray, color: GRO.textMid, label: s });
 
 const Badge = ({ status }) => {
   const s = statusInfo(status);
@@ -182,22 +201,22 @@ export default function App() {
 
   const qrValue = (id) => `${window.location.origin}${window.location.pathname}?equip=${id}`;
 
-  // Styles
-  const inp = { width: "100%", padding: "7px 10px", fontSize: 14, borderRadius: 6, border: "0.5px solid var(--color-border-secondary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" };
-  const btn = (v="default") => ({ padding: "7px 14px", fontSize: 13, fontWeight: 500, borderRadius: 6, cursor: "pointer", border: v==="danger" ? "0.5px solid var(--color-border-tertiary)" : "0.5px solid var(--color-border-secondary)", background: v==="primary" ? "var(--color-text-primary)" : v==="danger" ? "var(--color-background-danger)" : "var(--color-background-primary)", color: v==="primary" ? "var(--color-background-primary)" : v==="danger" ? "var(--color-text-danger)" : "var(--color-text-primary)" });
-  const card = { background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 10, padding: "12px 14px", marginBottom: 6 };
-  const tabBtn = (a) => ({ padding: "7px 14px", fontSize: 13, fontWeight: 500, borderRadius: 6, cursor: "pointer", border: "none", background: a ? "var(--color-text-primary)" : "transparent", color: a ? "var(--color-background-primary)" : "var(--color-text-secondary)" });
-  const metric = (bg) => ({ background: bg || "var(--color-background-secondary)", borderRadius: 8, padding: "12px 14px", flex: 1, minWidth: 72 });
-  const catHeader = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", cursor: "pointer", userSelect: "none" };
-  const sectionLabel = { fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" };
+  // Styles — mobile-first, GRO branded
+  const inp = { width: "100%", padding: "12px 14px", fontSize: 16, borderRadius: 8, border: `1.5px solid ${GRO.border}`, background: GRO.white, color: GRO.textDark, boxSizing: "border-box", WebkitAppearance: "none" };
+  const btn = (v="default") => ({ padding: "12px 18px", fontSize: 15, fontWeight: 600, borderRadius: 8, cursor: "pointer", border: "none", background: v==="primary" ? GRO.green : v==="danger" ? GRO.dangerBg : GRO.gray, color: v==="primary" ? GRO.white : v==="danger" ? GRO.danger : GRO.textDark });
+  const card = { background: GRO.white, border: `1px solid ${GRO.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 8 };
+  const tabBtn = (a) => ({ padding: "10px 16px", fontSize: 14, fontWeight: 600, borderRadius: 8, cursor: "pointer", border: "none", background: a ? GRO.green : GRO.gray, color: a ? GRO.white : GRO.textMid });
+  const metric = (bg) => ({ background: bg || GRO.gray, borderRadius: 10, padding: "14px", flex: 1, minWidth: 72 });
+  const catHeader = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", cursor: "pointer", userSelect: "none" };
+  const sectionLabel = { fontSize: 12, fontWeight: 700, color: GRO.green, textTransform: "uppercase", letterSpacing: "0.06em" };
 
-  if (!ready) return <div style={{ textAlign: "center", padding: 48, color: "var(--color-text-secondary)", fontSize: 14 }}>Loading...</div>;
-  if (loadError) return <div style={{ textAlign: "center", padding: 48, color: "var(--color-text-danger)", fontSize: 14 }}>{loadError}</div>;
+  if (!ready) return <div style={{ textAlign: "center", padding: 48, color: GRO.textMid, fontSize: 16 }}>Loading...</div>;
+  if (loadError) return <div style={{ textAlign: "center", padding: 48, color: GRO.danger, fontSize: 16 }}>{loadError}</div>;
 
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto", padding: "16px 12px", position: "relative" }}>
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 40px", position: "relative", background: GRO.gray, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
 
-      {toast && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "var(--color-text-primary)", color: "var(--color-background-primary)", padding: "8px 18px", borderRadius: 8, fontSize: 13, zIndex: 1000, pointerEvents: "none" }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: GRO.green, color: GRO.white, padding: "10px 20px", borderRadius: 10, fontSize: 14, zIndex: 1000, pointerEvents: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>{toast}</div>}
 
       {/* QR Modal */}
       {qrModal && (
@@ -218,19 +237,22 @@ export default function App() {
 
       {/* LOGIN */}
       {page === "login" && (
-        <div style={{ maxWidth: 380, margin: "0 auto", paddingTop: 40 }}>
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Equipment Tracker</div>
-            <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>Enter your PIN to continue</div>
+        <div style={{ paddingTop: 48 }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <div style={{ width: 120, height: 120, background: GRO.green, borderRadius: 24, margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box", boxShadow: "0 4px 16px rgba(45,95,63,0.25)" }}>
+              <img src="https://wearegro.com/wp-content/uploads/2022/06/cropped-gro-favicon-300x300.png" alt="GRO Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: GRO.textDark, marginBottom: 4 }}>GRO Equipment</div>
+            <div style={{ fontSize: 15, color: GRO.textMid }}>Enter your PIN to continue</div>
             {sessionStorage.getItem("deeplink-equip") && (
-              <div style={{ marginTop: 10, fontSize: 13, color: "var(--color-text-info)", background: "var(--color-background-info)", padding: "6px 12px", borderRadius: 6 }}>QR code scanned — sign in to complete checkout</div>
+              <div style={{ marginTop: 12, fontSize: 14, color: GRO.green, background: GRO.greenPale, padding: "8px 14px", borderRadius: 8 }}>QR code scanned — sign in to complete checkout</div>
             )}
           </div>
-          <div style={card}>
-            <label style={{ fontSize: 13, color: "var(--color-text-secondary)", display: "block", marginBottom: 4 }}>PIN</label>
-            <input type="password" placeholder="Enter PIN" value={pinInput} onChange={e => { setPinInput(e.target.value); setLoginError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} style={{ ...inp, marginBottom: 10 }} autoFocus />
-            {loginError && <p style={{ fontSize: 13, color: "var(--color-text-danger)", marginBottom: 8 }}>{loginError}</p>}
-            <button onClick={handleLogin} style={{ ...btn("primary"), width: "100%", padding: "9px" }}>Sign In</button>
+          <div style={{ ...card, padding: 20 }}>
+            <label style={{ fontSize: 14, fontWeight: 600, color: GRO.textMid, display: "block", marginBottom: 6 }}>PIN</label>
+            <input type="password" placeholder="Enter PIN" value={pinInput} onChange={e => { setPinInput(e.target.value); setLoginError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} style={{ ...inp, marginBottom: 12 }} autoFocus />
+            {loginError && <p style={{ fontSize: 14, color: GRO.danger, marginBottom: 10 }}>{loginError}</p>}
+            <button onClick={handleLogin} style={{ ...btn("primary"), width: "100%", padding: "14px" }}>Sign In</button>
           </div>
         </div>
       )}
@@ -238,9 +260,9 @@ export default function App() {
       {/* CREW */}
       {page === "crew" && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <div><div style={{ fontSize: 17, fontWeight: 500 }}>{currentUser.name}</div><div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>Crew member</div></div>
-            <button onClick={handleLogout} style={btn()}>Sign out</button>
+          <div style={{ background: GRO.green, margin: "-16px -16px 20px", padding: "20px 16px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div><div style={{ fontSize: 18, fontWeight: 700, color: GRO.white }}>{currentUser.name}</div><div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>Crew member</div></div>
+            <button onClick={handleLogout} style={{ ...btn(), background: "rgba(255,255,255,0.15)", color: GRO.white, padding: "8px 14px", fontSize: 13 }}>Sign out</button>
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
             <button onClick={() => setCrewTab("checkout")} style={tabBtn(crewTab === "checkout")}>Check Out</button>
@@ -298,9 +320,9 @@ export default function App() {
       {/* ADMIN */}
       {page === "admin" && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <div style={{ fontSize: 17, fontWeight: 500 }}>Admin Dashboard</div>
-            <button onClick={handleLogout} style={btn()}>Sign out</button>
+          <div style={{ background: GRO.green, margin: "-16px -16px 20px", padding: "20px 16px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div><div style={{ fontSize: 18, fontWeight: 700, color: GRO.white }}>GRO Equipment</div><div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>Admin Dashboard</div></div>
+            <button onClick={handleLogout} style={{ ...btn(), background: "rgba(255,255,255,0.15)", color: GRO.white, padding: "8px 14px", fontSize: 13 }}>Sign out</button>
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
             {["dashboard","equipment","crew","history"].map(t => <button key={t} onClick={() => setAdminTab(t)} style={tabBtn(adminTab === t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
@@ -451,5 +473,4 @@ export default function App() {
         </div>
       )}
     </div>
-  );
-}
+  )}
