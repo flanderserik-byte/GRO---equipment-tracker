@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -22,17 +22,17 @@ const fetchJobSites   = async () => { const { data, error } = await supabase.fro
 const addJobSite      = async (name, address) => { const { error } = await supabase.from("job_sites").insert([{ name, address: address || null }]); if (error) throw error; };
 const addJobSitesBulk = async (sites) => { const { error } = await supabase.from("job_sites").insert(sites.map(s => ({ name: s.name, address: s.address || null }))); if (error) throw error; };
 const updateJobSiteAddress = async (id, address) => { const { error } = await supabase.from("job_sites").update({ address: address || null }).eq("id", id); if (error) throw error; };
+const removeJobSite   = async (id) => { const { error } = await supabase.from("job_sites").update({ active: false }).eq("id", id); if (error) throw error; };
+const fetchDamageReports = async () => { const { data, error } = await supabase.from("damage_reports").select("*").order("created_at", { ascending: false }); if (error) throw error; return data; };
+const createDamageReport = async ({ equipmentId, crewId, description }) => { const { error } = await supabase.from("damage_reports").insert([{ equipment_id: equipmentId, crew_id: crewId, description }]); if (error) throw error; };
+const resolveDamageReport = async (id) => { const { error } = await supabase.from("damage_reports").update({ resolved: true }).eq("id", id); if (error) throw error; };
 
-// Opens Apple Maps on iPhone/iPad, Google Maps everywhere else, with directions from current location
+// Opens Apple Maps on iPhone/iPad/Mac, Google Maps everywhere else, with directions from current location
 const mapsUrl = (q) => {
   const enc = encodeURIComponent(q);
   const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
   return isApple ? `https://maps.apple.com/?daddr=${enc}` : `https://www.google.com/maps/dir/?api=1&destination=${enc}`;
 };
-const removeJobSite   = async (id) => { const { error } = await supabase.from("job_sites").update({ active: false }).eq("id", id); if (error) throw error; };
-const fetchDamageReports = async () => { const { data, error } = await supabase.from("damage_reports").select("*").order("created_at", { ascending: false }); if (error) throw error; return data; };
-const createDamageReport = async ({ equipmentId, crewId, description }) => { const { error } = await supabase.from("damage_reports").insert([{ equipment_id: equipmentId, crew_id: crewId, description }]); if (error) throw error; };
-const resolveDamageReport = async (id) => { const { error } = await supabase.from("damage_reports").update({ resolved: true }).eq("id", id); if (error) throw error; };
 
 const ADMIN_PIN = "1234";
 const CATEGORIES = ["Power Tools","Heavy Equipment","Small Engine Equipment","Hand Tools","Measurement","Safety","General"];
@@ -65,9 +65,21 @@ const Badge = ({ status }) => {
   return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap" }}>{s.label}</span>;
 };
 
+// QR code renderer (uses qrcodejs from CDN)
+function QRCode({ value, size = 160 }) {
+  const ref = useRef();
+  useEffect(() => {
+    if (!window.QRCode || !ref.current) return;
+    ref.current.innerHTML = "";
+    new window.QRCode(ref.current, { text: value, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.M });
+  }, [value, size]);
+  return <div ref={ref} style={{ display: "inline-block" }} />;
+}
+
 export default function App() {
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [qrLibLoaded, setQrLibLoaded] = useState(false);
   const [equipment, setEquipment] = useState([]);
   const [crew, setCrew] = useState([]);
   const [checkouts, setCheckouts] = useState([]);
@@ -83,15 +95,25 @@ export default function App() {
   const [newEquip, setNewEquip] = useState({ name: "", category: "Hand Tools" });
   const [newCrew, setNewCrew] = useState({ name: "", pin: "" });
   const [newSite, setNewSite] = useState("");
-  const [csvPreview, setCsvPreview] = useState(null); // { headers, rows, col }
+  const [csvPreview, setCsvPreview] = useState(null);
   const [coForm, setCoForm] = useState({ equipmentId: "", location: "", returnDate: "" });
   const [reportForm, setReportForm] = useState({ equipmentId: "", description: "" });
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCrew, setFilterCrew] = useState("all");
   const [maintModal, setMaintModal] = useState(null);
   const [maintNotes, setMaintNotes] = useState("");
+  const [qrModal, setQrModal] = useState(null);
   const [toast, setToast] = useState(null);
   const [collapsedCats, setCollapsedCats] = useState({});
+
+  // Load QR library from CDN
+  useEffect(() => {
+    if (window.QRCode) { setQrLibLoaded(true); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+    s.onload = () => setQrLibLoaded(true);
+    document.head.appendChild(s);
+  }, []);
 
   const loadAll = async () => {
     const [eq, cr, co, js, dr] = await Promise.all([
@@ -179,6 +201,29 @@ export default function App() {
   };
   const handleRemoveSite = wrap(removeJobSite, "Job site removed");
 
+  const handleEditAddress = async (site) => {
+    const a = window.prompt(`Address for "${site.name}":`, site.address || "");
+    if (a === null) return;
+    try { await updateJobSiteAddress(site.id, a.trim()); await loadAll(); showToast("Address updated"); }
+    catch { showToast("Error updating address"); }
+  };
+
+  const handleSetStatus = async (id, status) => {
+    try { await setEquipmentStatus(id, status, maintNotes); await loadAll(); setMaintModal(null); setMaintNotes(""); showToast("Status updated"); }
+    catch { showToast("Error updating status"); }
+  };
+
+  const handleReport = async () => {
+    if (!reportForm.equipmentId || !reportForm.description.trim()) return;
+    try {
+      await createDamageReport({ equipmentId: reportForm.equipmentId, crewId: currentUser.id, description: reportForm.description.trim() });
+      await loadAll();
+      setReportForm({ equipmentId: "", description: "" });
+      showToast("Report submitted — thank you!");
+    } catch { showToast("Error submitting report"); }
+  };
+  const handleResolveReport = wrap(resolveDamageReport, "Marked resolved");
+
   // ─── CSV import for job sites ───
   const parseCSVLine = (line) => {
     const out = []; let cur = ""; let inQ = false;
@@ -213,42 +258,39 @@ export default function App() {
 
   const handleCSVImport = async () => {
     if (!csvPreview) return;
-    const existing = new Set(jobSites.map(s => s.name.toLowerCase()));
+    const existingByName = {};
+    jobSites.forEach(s => { existingByName[s.name.toLowerCase()] = s; });
     const seen = new Set();
-    const sites = [];
-    for (const r of csvPreview.rows) {
-      const name = (r[csvPreview.col] || "").trim();
-      if (!name || existing.has(name.toLowerCase()) || seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      const address = csvPreview.addrCol >= 0 ? (r[csvPreview.addrCol] || "").trim() : "";
-      sites.push({ name, address });
-    }
-    if (!sites.length) { showToast("No new sites found — all duplicates or empty"); setCsvPreview(null); return; }
+    const newSites = [];
+    let updated = 0;
     try {
-      await addJobSitesBulk(sites);
+      for (const r of csvPreview.rows) {
+        const name = (r[csvPreview.col] || "").trim();
+        if (!name || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        const address = csvPreview.addrCol >= 0 ? (r[csvPreview.addrCol] || "").trim() : "";
+        const existing = existingByName[name.toLowerCase()];
+        if (existing) {
+          // Update the address of an existing site if the CSV has one
+          if (address && address !== (existing.address || "")) {
+            await updateJobSiteAddress(existing.id, address);
+            updated++;
+          }
+        } else {
+          newSites.push({ name, address });
+        }
+      }
+      if (newSites.length) await addJobSitesBulk(newSites);
       await loadAll();
       setCsvPreview(null);
-      showToast(`Imported ${sites.length} job site${sites.length !== 1 ? "s" : ""}`);
+      if (!newSites.length && !updated) showToast("Nothing new to import");
+      else showToast(`Imported ${newSites.length} new, updated ${updated} address${updated !== 1 ? "es" : ""}`);
     } catch { showToast("Error importing sites"); }
   };
 
-  const handleSetStatus = async (id, status) => {
-    try { await setEquipmentStatus(id, status, maintNotes); await loadAll(); setMaintModal(null); setMaintNotes(""); showToast("Status updated"); }
-    catch { showToast("Error updating status"); }
-  };
-
-  const handleReport = async () => {
-    if (!reportForm.equipmentId || !reportForm.description.trim()) return;
-    try {
-      await createDamageReport({ equipmentId: reportForm.equipmentId, crewId: currentUser.id, description: reportForm.description.trim() });
-      await loadAll();
-      setReportForm({ equipmentId: "", description: "" });
-      showToast("Report submitted — thank you!");
-    } catch { showToast("Error submitting report"); }
-  };
-  const handleResolveReport = wrap(resolveDamageReport, "Marked resolved");
-
   const toggleCat = (cat) => setCollapsedCats(p => ({ ...p, [cat]: !p[cat] }));
+
+  const qrValue = (id) => `${window.location.origin}${window.location.pathname}?equip=${id}`;
 
   const availableCount  = equipment.filter(e => getStatus(e) === "available").length;
   const checkedOutCount = equipment.filter(e => getStatus(e) === "checked-out").length;
@@ -280,6 +322,22 @@ export default function App() {
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 40px", position: "relative", background: GRO.gray, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
 
       {toast && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: GRO.green, color: GRO.white, padding: "10px 20px", borderRadius: 10, fontSize: 14, zIndex: 1000, pointerEvents: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>{toast}</div>}
+
+      {/* QR code modal */}
+      {qrModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setQrModal(null)}>
+          <div style={{ background: GRO.white, borderRadius: 14, padding: 22, width: "100%", maxWidth: 300, textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{qrModal.name}</div>
+            <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 16 }}>{qrModal.category}</div>
+            {qrLibLoaded
+              ? <QRCode value={qrValue(qrModal.id)} size={180} />
+              : <div style={{ width: 180, height: 180, background: GRO.gray, borderRadius: 8, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: GRO.textMid }}>Loading...</div>}
+            <div style={{ fontSize: 12, color: GRO.textMid, marginTop: 12, marginBottom: 16 }}>Print and stick this on the equipment. Scanning it with a phone camera opens the app with this item pre-selected for checkout.</div>
+            <button onClick={() => window.print()} style={{ ...btn(), width: "100%", marginBottom: 8 }}>Print</button>
+            <button onClick={() => setQrModal(null)} style={{ ...btn(), width: "100%" }}>Close</button>
+          </div>
+        </div>
+      )}
 
       {/* Maintenance status modal */}
       {maintModal && (
@@ -475,13 +533,17 @@ export default function App() {
                     {!collapsed && items.map(e => {
                       const s = getStatus(e), co = getActiveCo(e.id);
                       const member = co ? crew.find(c => c.id === co.crew_id) : null;
+                      const site = co ? jobSites.find(js => js.name === co.location) : null;
                       return (
                         <div key={e.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 700, fontSize: 14 }}>{e.name}</div>
-                            {(member || co) && <div style={{ fontSize: 12, color: GRO.textMid, marginTop: 1 }}>{member ? member.name : ""}{co ? ` · ${co.location}` : ""}</div>}
+                            {member && <div style={{ fontSize: 12, color: GRO.textMid, marginTop: 1 }}>{member.name}</div>}
+                            {co && (
+                              <a href={mapsUrl((site && site.address) || co.location)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: GRO.green, fontWeight: 600, textDecoration: "none" }}>📍 {co.location}</a>
+                            )}
                             {co && <div style={{ fontSize: 12, color: isOverdue(co.return_date) ? GRO.danger : GRO.textMid }}>Due: {co.return_date}</div>}
-                            {e.maintenance_notes && s !== "available" && s !== "checked-out" && s !== "overdue" && <div style={{ fontSize: 12, color: GRO.info }}>{e.maintenance_notes}</div>}
+                            {e.maintenance_notes && (s === "needs-repair" || s === "in-maintenance") && <div style={{ fontSize: 12, color: GRO.info }}>{e.maintenance_notes}</div>}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8, flexShrink: 0 }}>
                             <Badge status={s} />
@@ -524,6 +586,7 @@ export default function App() {
                           </div>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                             <Badge status={s} />
+                            <button onClick={() => setQrModal(e)} style={{ ...btn(), fontSize: 12, padding: "6px 10px" }}>QR</button>
                             <button onClick={() => { setMaintModal(e); setMaintNotes(e.maintenance_notes || ""); }} style={{ ...btn(), fontSize: 12, padding: "6px 10px" }}>Status</button>
                             {s === "available" && <button onClick={() => handleRemoveEquipment(e.id)} style={{ ...btn("danger"), fontSize: 12, padding: "6px 10px" }}>✕</button>}
                           </div>
@@ -574,7 +637,7 @@ export default function App() {
 
               <div style={{ ...card, marginBottom: 14 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Import from Aspire (CSV)</div>
-                <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 12 }}>Export a property or job report from Aspire as CSV, then upload it here. Duplicates are skipped automatically.</div>
+                <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 12 }}>Export a property report from Aspire as CSV with names and addresses, then upload it. New sites are added, and existing sites get their addresses updated.</div>
                 {!csvPreview ? (
                   <label style={{ ...btn(), display: "block", textAlign: "center", cursor: "pointer" }}>
                     Choose CSV File
@@ -582,8 +645,13 @@ export default function App() {
                   </label>
                 ) : (
                   <div>
-                    <label style={label}>Which column has the job site names?</label>
+                    <label style={label}>Job site name column</label>
                     <select value={csvPreview.col} onChange={e => setCsvPreview(p => ({ ...p, col: parseInt(e.target.value) }))} style={{ ...inp, marginBottom: 10 }}>
+                      {csvPreview.headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                    </select>
+                    <label style={label}>Address column</label>
+                    <select value={csvPreview.addrCol} onChange={e => setCsvPreview(p => ({ ...p, addrCol: parseInt(e.target.value) }))} style={{ ...inp, marginBottom: 10 }}>
+                      <option value={-1}>No address column</option>
                       {csvPreview.headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
                     </select>
                     <div style={{ fontSize: 13, color: GRO.textMid, marginBottom: 10 }}>
@@ -602,10 +670,11 @@ export default function App() {
                 <div key={s.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{s.name}</div>
-                    {s.address && <div style={{ fontSize: 12, color: GRO.textMid }}>{s.address}</div>}
+                    <div style={{ fontSize: 12, color: s.address ? GRO.textMid : GRO.warning }}>{s.address || "No address — directions will search by name"}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-                    <a href={mapsUrl(s.address || s.name)} target="_blank" rel="noopener noreferrer" style={{ ...btn(), fontSize: 12, padding: "6px 10px", textDecoration: "none", background: GRO.greenPale, color: GRO.green }}>Directions</a>
+                    <a href={mapsUrl(s.address || s.name)} target="_blank" rel="noopener noreferrer" style={{ ...btn(), fontSize: 12, padding: "6px 10px", textDecoration: "none", background: GRO.greenPale, color: GRO.green }}>Map</a>
+                    <button onClick={() => handleEditAddress(s)} style={{ ...btn(), fontSize: 12, padding: "6px 10px" }}>Edit</button>
                     <button onClick={() => handleRemoveSite(s.id)} style={{ ...btn("danger"), fontSize: 12, padding: "6px 10px" }}>✕</button>
                   </div>
                 </div>
